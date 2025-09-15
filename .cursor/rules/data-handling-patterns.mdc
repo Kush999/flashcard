@@ -1,0 +1,267 @@
+---
+alwaysApply: true
+---
+
+# Data Handling & Validation Rules
+
+This flashcards project follows strict patterns for data retrieval, mutations, and validation to ensure type safety and proper server-side handling.
+
+## Data Retrieval Rules
+
+### ✅ MANDATORY: Use Server Components for Data Fetching
+All data retrieval must be performed in Server Components, never in Client Components.
+
+```typescript
+// ✅ CORRECT - Server Component data fetching
+import { auth } from "@clerk/nextjs/server"
+import { db } from "@/db"
+import { decksTable } from "@/db/schema"
+import { eq } from "drizzle-orm"
+
+export default async function DecksPage() {
+  const { userId } = await auth()
+  if (!userId) {
+    redirect("/sign-in")
+  }
+  
+  // Fetch data directly in server component
+  const decks = await db.select()
+    .from(decksTable)
+    .where(eq(decksTable.userId, userId))
+  
+  return <DecksView decks={decks} />
+}
+
+// ❌ FORBIDDEN - Client component data fetching
+"use client"
+export default function DecksPage() {
+  const [decks, setDecks] = useState([])
+  
+  useEffect(() => {
+    fetch('/api/decks') // Never do this
+      .then(res => res.json())
+      .then(setDecks)
+  }, [])
+  
+  return <DecksView decks={decks} />
+}
+```
+
+### Server Component Patterns
+- Perform database queries directly in server components
+- Use async/await for data fetching
+- Pass data as props to client components
+- Handle authentication in server components using `auth()` from Clerk
+
+## Database Mutation Rules
+
+### ✅ MANDATORY: Use Server Actions for All Mutations
+All CREATE, UPDATE, DELETE operations must use Server Actions, never API routes or client-side mutations.
+
+```typescript
+// ✅ CORRECT - Server Action for mutations
+"use server"
+
+import { auth } from "@clerk/nextjs/server"
+import { db } from "@/db"
+import { decksTable } from "@/db/schema"
+import { eq, and } from "drizzle-orm"
+import { revalidatePath } from "next/cache"
+import { z } from "zod"
+
+// Define validation schema
+const CreateDeckSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name too long"),
+  description: z.string().max(500, "Description too long").optional()
+})
+
+type CreateDeckInput = z.infer<typeof CreateDeckSchema>
+
+export async function createDeck(input: CreateDeckInput) {
+  // Validate input
+  const validatedInput = CreateDeckSchema.parse(input)
+  
+  // Authenticate user
+  const { userId } = await auth()
+  if (!userId) {
+    throw new Error("Unauthorized")
+  }
+  
+  try {
+    // Perform database mutation
+    const [newDeck] = await db.insert(decksTable).values({
+      userId,
+      name: validatedInput.name,
+      description: validatedInput.description
+    }).returning()
+    
+    // Revalidate affected pages
+    revalidatePath("/decks")
+    
+    return { success: true, deck: newDeck }
+  } catch (error) {
+    throw new Error("Failed to create deck")
+  }
+}
+
+// ❌ FORBIDDEN - API route mutations
+export async function POST(request: Request) {
+  // Never use API routes for mutations
+}
+
+// ❌ FORBIDDEN - Client-side mutations
+"use client"
+const handleSubmit = async (formData: FormData) => {
+  // Never perform mutations in client components
+  await fetch('/api/decks', { method: 'POST' })
+}
+```
+
+### Server Action Requirements
+1. Always mark with `"use server"` directive
+2. Authenticate user with `auth()` from Clerk
+3. Validate all input data with Zod schemas
+4. Use TypeScript types for input parameters
+5. Call `revalidatePath()` or `redirect()` after mutations
+6. Handle errors gracefully with meaningful messages
+
+## Data Validation Rules
+
+### ✅ MANDATORY: Use Zod for All Data Validation
+Every piece of data entering the system must be validated using Zod schemas.
+
+```typescript
+// ✅ CORRECT - Zod validation schemas
+import { z } from "zod"
+
+// Define schemas for each operation
+export const CreateDeckSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name too long"),
+  description: z.string().max(500, "Description too long").optional()
+})
+
+export const UpdateDeckSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1, "Name is required").max(100, "Name too long").optional(),
+  description: z.string().max(500, "Description too long").optional()
+})
+
+export const CreateCardSchema = z.object({
+  deckId: z.string(),
+  front: z.string().min(1, "Front text is required"),
+  back: z.string().min(1, "Back text is required")
+})
+
+// Export inferred types
+export type CreateDeckInput = z.infer<typeof CreateDeckSchema>
+export type UpdateDeckInput = z.infer<typeof UpdateDeckSchema>
+export type CreateCardInput = z.infer<typeof CreateCardSchema>
+
+// ❌ FORBIDDEN - No validation
+export async function createDeck(data: any) {
+  // Never accept unvalidated data
+}
+
+// ❌ FORBIDDEN - Using FormData as type
+export async function createDeck(formData: FormData) {
+  // Never use FormData as parameter type
+}
+```
+
+### Validation Patterns
+- Create Zod schemas for all input types
+- Use `z.infer<>` to generate TypeScript types
+- Validate data at the entry point of server actions
+- Provide meaningful error messages in schemas
+- Use schema methods like `.parse()` for validation
+
+## TypeScript Type Requirements
+
+### ✅ MANDATORY: Strongly Typed Server Action Parameters
+Server actions must use specific TypeScript types, never `FormData` or `any`.
+
+```typescript
+// ✅ CORRECT - Strongly typed parameters
+export async function updateCard(input: UpdateCardInput) {
+  const validatedInput = UpdateCardSchema.parse(input)
+  // ... rest of implementation
+}
+
+// ✅ CORRECT - Multiple parameters with types
+export async function deleteCard(cardId: string, deckId: string) {
+  // Validate individual parameters
+  const validatedCardId = z.string().parse(cardId)
+  const validatedDeckId = z.string().parse(deckId)
+  // ... rest of implementation
+}
+
+// ❌ FORBIDDEN - FormData parameter
+export async function updateCard(formData: FormData) {
+  // Never use FormData as parameter type
+}
+
+// ❌ FORBIDDEN - Untyped parameters
+export async function updateCard(input: any) {
+  // Never use any type
+}
+```
+
+## Client Component Integration
+
+### Form Handling with Server Actions
+```typescript
+// ✅ CORRECT - Client component calling server action
+"use client"
+
+import { useState } from "react"
+import { createDeck } from "@/actions/deck-actions"
+import type { CreateDeckInput } from "@/schemas/deck-schemas"
+
+export function CreateDeckForm() {
+  const [isLoading, setIsLoading] = useState(false)
+  
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setIsLoading(true)
+    
+    const formData = new FormData(event.currentTarget)
+    const input: CreateDeckInput = {
+      name: formData.get("name") as string,
+      description: formData.get("description") as string
+    }
+    
+    try {
+      await createDeck(input)
+      // Handle success
+    } catch (error) {
+      // Handle error
+    } finally {
+      setIsLoading(false)
+    }
+  }
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Form fields */}
+    </form>
+  )
+}
+```
+
+## File Organization
+
+- **Schemas**: Store in `src/schemas/` directory
+- **Server Actions**: Store in `src/actions/` directory  
+- **Types**: Export from schema files using `z.infer<>`
+- **Database Operations**: Always in server actions, never in API routes
+
+## Forbidden Practices
+
+- ❌ Using `fetch()` in client components for data retrieval
+- ❌ Creating API routes for database mutations
+- ❌ Using `FormData` as TypeScript parameter type
+- ❌ Accepting unvalidated data in server actions
+- ❌ Using `any` type for server action parameters
+- ❌ Performing database operations in client components
+- ❌ Skipping authentication checks in server actions
+- ❌ Missing `revalidatePath()` calls after mutations

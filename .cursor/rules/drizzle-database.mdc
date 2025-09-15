@@ -1,0 +1,137 @@
+---
+alwaysApply: true
+description: "Database interactions must always use Drizzle ORM with the defined schema"
+---
+
+# Drizzle Database Schema Rules
+
+This flashcards project uses **Drizzle ORM** for all database interactions. All database operations must use the predefined schema and follow Drizzle query patterns.
+
+## Schema Definition
+
+The database schema is defined in [src/db/schema.ts](mdc:src/db/schema.ts) and includes:
+
+- **decksTable** - Flashcard decks with user ownership
+- **cardsTable** - Individual flashcards within decks  
+- **studySessionsTable** - User study progress tracking
+
+## Database Connection
+
+Always import the database connection from [src/db/index.ts](mdc:src/db/index.ts):
+
+```typescript
+import { db } from "@/db"
+```
+
+## Required Imports
+
+### Schema Tables
+```typescript
+import { decksTable, cardsTable, studySessionsTable } from "@/db/schema"
+```
+
+### Drizzle Query Functions
+```typescript
+import { eq, and, desc, asc, count, sql } from "drizzle-orm"
+```
+
+## Query Patterns
+
+### SELECT Operations
+```typescript
+// Get all decks for a user
+const userDecks = await db.select().from(decksTable).where(eq(decksTable.userId, userId))
+
+// Get cards in a deck
+const deckCards = await db.select().from(cardsTable).where(eq(cardsTable.deckId, deckId))
+
+// Join operations
+const decksWithCardCount = await db
+  .select({
+    ...decksTable,
+    cardCount: count(cardsTable.id)
+  })
+  .from(decksTable)
+  .leftJoin(cardsTable, eq(decksTable.id, cardsTable.deckId))
+  .where(eq(decksTable.userId, userId))
+  .groupBy(decksTable.id)
+```
+
+### INSERT Operations
+```typescript
+// Insert new deck
+const [newDeck] = await db.insert(decksTable).values({
+  userId,
+  name: "My Deck",
+  description: "Deck description"
+}).returning()
+
+// Insert new card
+const [newCard] = await db.insert(cardsTable).values({
+  deckId,
+  front: "Question",
+  back: "Answer"
+}).returning()
+```
+
+### UPDATE Operations
+```typescript
+// Update deck
+const [updatedDeck] = await db
+  .update(decksTable)
+  .set({ name: "Updated Name", updatedAt: new Date() })
+  .where(eq(decksTable.id, deckId))
+  .returning()
+```
+
+### DELETE Operations
+```typescript
+// Delete deck (cascades to cards)
+await db.delete(decksTable).where(eq(decksTable.id, deckId))
+
+// Delete specific card
+await db.delete(cardsTable).where(eq(cardsTable.id, cardId))
+```
+
+## Mandatory Requirements
+
+1. **Never use raw SQL** - Always use Drizzle query builder
+2. **Always use schema imports** - Import table definitions from [src/db/schema.ts](mdc:src/db/schema.ts)
+3. **Use proper WHERE clauses** - Always use `eq()`, `and()`, etc. from drizzle-orm
+4. **Handle user ownership** - Always filter by `userId` for user-owned resources
+5. **Use transactions** - For multi-table operations, wrap in `db.transaction()`
+6. **Return data** - Use `.returning()` for INSERT/UPDATE operations when you need the data
+7. **Handle cascading deletes** - Schema defines cascade relationships, leverage them
+
+## Error Handling
+
+Always wrap database operations in try-catch blocks:
+
+```typescript
+try {
+  const result = await db.select().from(decksTable).where(eq(decksTable.userId, userId))
+  return result
+} catch (error) {
+  console.error("Database operation failed:", error)
+  throw new Error("Failed to fetch decks")
+}
+```
+
+## Type Safety
+
+Drizzle provides full TypeScript support. Always use inferred types:
+
+```typescript
+type Deck = typeof decksTable.$inferSelect
+type NewDeck = typeof decksTable.$inferInsert
+type Card = typeof cardsTable.$inferSelect
+type NewCard = typeof cardsTable.$inferInsert
+```
+
+## Forbidden Practices
+
+- ❌ Raw SQL queries
+- ❌ Direct table access without schema imports
+- ❌ Operations without proper user authorization checks
+- ❌ Ignoring TypeScript errors from Drizzle
+- ❌ Using deprecated Drizzle APIs

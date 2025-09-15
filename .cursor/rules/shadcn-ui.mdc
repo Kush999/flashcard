@@ -1,0 +1,80 @@
+---
+alwaysApply: true
+description: shadcn/ui component library usage and installation guide
+---
+
+# shadcn/ui Component Library Rules
+
+This flashcards project uses **shadcn/ui** as the primary UI component library. All UI components should be sourced from shadcn/ui for consistency and design system compliance.
+
+## Project Configuration
+
+The project is already configured with shadcn/ui:
+- Configuration: [components.json](mdc:components.json)
+- Utilities: [src/lib/utils.ts](mdc:src/lib/utils.ts)
+- CSS Variables: [src/app/globals.css](mdc:src/app/globals.css)
+
+## Installation Commands
+
+### If shadcn/ui is not initialized:
+```bash
+npx shadcn@latest init --yes
+```
+
+### To install specific components:
+```bash
+npx shadcn@latest add [component-name]
+```
+
+**Examples:**
+```bash
+npx shadcn@latest add button
+npx shadcn@latest add card
+npx shadcn@latest add input
+npx shadcn@latest add dialog
+npx shadcn@latest add toast
+```
+
+## Usage Guidelines
+
+1. **Always import from the UI components directory:**
+   ```tsx
+   import { Button } from "@/components/ui/button"
+   import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+   ```
+
+2. **Use the `cn()` utility for conditional styling:**
+   ```tsx
+   import { cn } from "@/lib/utils"
+   
+   <Button className={cn("custom-class", condition && "conditional-class")} />
+   ```
+
+3. **Leverage component variants:**
+   ```tsx
+   <Button variant="default">Primary Action</Button>
+   <Button variant="secondary">Secondary Action</Button>
+   <Button variant="outline">Outline Button</Button>
+   ```
+
+4. **Before creating custom components, check if shadcn/ui has a suitable component:**
+   - Visit: https://ui.shadcn.com/docs/components
+   - Use: `npx shadcn@latest add [component]` to install
+
+## Available Components
+
+Common components for this flashcards app:
+- `button` - For actions and interactions
+- `card` - For flashcard displays
+- `input` - For form inputs
+- `dialog` - For modals and overlays
+- `toast` - For notifications
+- `badge` - For labels and tags
+- `progress` - For learning progress
+- `tabs` - For navigation between sections
+- `form` - For structured forms
+- `dropdown-menu` - For context menus
+
+## Theme Support
+
+The project supports both light and dark modes through CSS variables defined in [src/app/globals.css](mdc:src/app/globals.css). All shadcn/ui components automatically respect the theme configuration.

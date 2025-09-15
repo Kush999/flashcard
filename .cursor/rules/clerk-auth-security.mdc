@@ -1,0 +1,209 @@
+---
+alwaysApply: true
+---
+
+# Clerk Authentication & Data Security Rules
+
+This flashcards project uses **Clerk** for authentication. **CRITICAL**: Users must ONLY access their own data. Every database operation and API route must enforce user ownership.
+
+## Authentication Setup
+
+### Middleware Configuration
+The project uses Clerk middleware in [src/middleware.ts](mdc:src/middleware.ts) to protect routes and handle authentication.
+
+### Getting Current User
+Always use Clerk's authentication helpers to get the current user:
+
+```typescript
+import { auth, currentUser } from "@clerk/nextjs/server"
+
+// Get user ID (most common)
+const { userId } = await auth()
+if (!userId) {
+  throw new Error("Unauthorized")
+}
+
+// Get full user object (when needed)
+const user = await currentUser()
+if (!user) {
+  throw new Error("Unauthorized")
+}
+```
+
+## Data Security Patterns
+
+### 1. Database Query Security
+**MANDATORY**: Every database query for user-owned resources MUST filter by userId:
+
+```typescript
+// ✅ CORRECT - Always filter by userId
+const userDecks = await db.select()
+  .from(decksTable)
+  .where(eq(decksTable.userId, userId))
+
+// ✅ CORRECT - Verify ownership before operations
+const deck = await db.select()
+  .from(decksTable)
+  .where(and(
+    eq(decksTable.id, deckId),
+    eq(decksTable.userId, userId)  // Critical ownership check
+  ))
+
+if (deck.length === 0) {
+  throw new Error("Deck not found or access denied")
+}
+
+// ❌ FORBIDDEN - Never query without user ownership check
+const allDecks = await db.select().from(decksTable) // SECURITY VIOLATION
+```
+
+### 2. API Route Security
+Every API route must authenticate and authorize the user:
+
+```typescript
+// API Route Pattern
+export async function GET() {
+  try {
+    const { userId } = await auth()
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Only query user's data
+    const data = await db.select()
+      .from(decksTable)
+      .where(eq(decksTable.userId, userId))
+
+    return NextResponse.json(data)
+  } catch (error) {
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
+
+// POST/PUT/DELETE - Always verify ownership
+export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+  try {
+    const { userId } = await auth()
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Verify ownership before deletion
+    const [deck] = await db.select()
+      .from(decksTable)
+      .where(and(
+        eq(decksTable.id, params.id),
+        eq(decksTable.userId, userId)
+      ))
+
+    if (!deck) {
+      return NextResponse.json({ error: "Deck not found or access denied" }, { status: 404 })
+    }
+
+    // Now safe to delete
+    await db.delete(decksTable).where(eq(decksTable.id, params.id))
+    
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
+```
+
+### 3. Client-Side Authentication
+Use Clerk's React hooks for client-side authentication:
+
+```typescript
+import { useUser, useAuth } from "@clerk/nextjs"
+
+// Check if user is signed in
+const { isSignedIn, user } = useUser()
+const { userId } = useAuth()
+
+// Protect client-side components
+if (!isSignedIn) {
+  return <div>Please sign in to access this feature.</div>
+}
+```
+
+## Security Requirements
+
+### ✅ MANDATORY Practices
+1. **Always authenticate**: Every protected route/API must call `auth()` or `currentUser()`
+2. **Filter by userId**: Every database query for user data MUST include `eq(table.userId, userId)`
+3. **Verify ownership**: Before any UPDATE/DELETE, verify the resource belongs to the user
+4. **Use transactions**: For multi-table operations, ensure atomicity with user ownership checks
+5. **Handle errors**: Return proper HTTP status codes (401 for unauthorized, 404 for not found/no access)
+
+### ❌ FORBIDDEN Practices
+- Querying tables without user ownership filters
+- Using hardcoded user IDs
+- Trusting client-side user data without server verification
+- Bypassing authentication checks in API routes
+- Exposing internal database errors to clients
+
+## Resource Ownership Patterns
+
+### Decks → User Relationship
+```typescript
+// ✅ Get user's decks
+const userDecks = await db.select().from(decksTable).where(eq(decksTable.userId, userId))
+
+// ✅ Verify deck ownership
+const deckExists = await db.select().from(decksTable)
+  .where(and(eq(decksTable.id, deckId), eq(decksTable.userId, userId)))
+```
+
+### Cards → Deck → User Relationship
+```typescript
+// ✅ Get cards from user's deck (with ownership verification)
+const userCards = await db.select({
+    ...cardsTable,
+    deckUserId: decksTable.userId
+  })
+  .from(cardsTable)
+  .innerJoin(decksTable, eq(cardsTable.deckId, decksTable.id))
+  .where(and(
+    eq(cardsTable.deckId, deckId),
+    eq(decksTable.userId, userId)
+  ))
+```
+
+### Study Sessions → User Relationship
+```typescript
+// ✅ Get user's study sessions
+const userSessions = await db.select()
+  .from(studySessionsTable)
+  .where(eq(studySessionsTable.userId, userId))
+```
+
+## Error Handling
+
+Always provide secure error messages that don't leak information:
+
+```typescript
+// ✅ CORRECT - Generic error messages
+if (!userResource) {
+  return NextResponse.json({ error: "Resource not found" }, { status: 404 })
+}
+
+// ❌ WRONG - Exposes internal information
+if (!userResource) {
+  return NextResponse.json({ error: "User 123 tried to access deck 456 owned by user 789" }, { status: 404 })
+}
+```
+
+## Common Security Vulnerabilities to Avoid
+
+1. **IDOR (Insecure Direct Object References)**: Never trust IDs from client without ownership verification
+2. **Missing Authorization**: Every protected endpoint must verify user identity
+3. **Privilege Escalation**: Users cannot modify or access other users' data
+4. **Data Leakage**: Error messages must not expose sensitive information
+
+## Testing Authentication
+
+When testing, always verify:
+- Unauthenticated users get 401 responses
+- Users can only access their own resources
+- Cross-user data access is properly blocked
+- Error messages don't leak sensitive data
